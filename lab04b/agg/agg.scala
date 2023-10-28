@@ -17,8 +17,8 @@ object agg {
         val kafkaTopicInput: String = "denis_lomakov"
         val kafkaTopicOutput: String = "denis_lomakov_lab04b_out"
         val offsets: String = "earliest"
-        val checkpointLocation: String = "/user/denis.lomakov/tmp/chk/lab04"
-        val trigger: String = "5 seconds"
+        val checkpointLocation: String = "/user/denis.lomakov/tmp/check/lab04"
+        val trigger: String = "10 seconds"
         val mode: String = "update"
 
         // Spark-сессия
