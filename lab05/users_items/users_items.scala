@@ -1,5 +1,6 @@
 // Import Libs
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.expressions.Window
 import org.apache.log4j._
@@ -30,30 +31,21 @@ object users_items {
     val view = spark.read.json(inputDir + "/view")
       .where(col("uid").isNotNull)
       .withColumn("max_date", first(to_date(col("date"), "yyyyMMdd")).over(WindSpec))
-      .withColumn("new_item_id", concat(lit("view_"), regexp_replace(lower(col("item_id")), "-", "_")))
-      .select("uid", "new_item_id", "max_date")
-
-    // Сгруппируем и развернем информацию о посещениях
-    val viewMatrix = view
-      .groupBy(col("uid"), col("max_date")).pivot("new_item_id")
-      .count().na.fill(0)
+      .withColumn("item_id", concat(lit("view_"), regexp_replace(lower(col("item_id")), "-", "_")))
+      .select("uid", "item_id", "max_date")
 
     // Прочитаем информацию о покупках из json из HDFS
-    val buy = spark.read.json(inputDir + "/buy")
+    val buy: DataFrame = spark.read.json(inputDir + "/buy")
       .where(col("uid").isNotNull)
       .withColumn("max_date", first(to_date(col("date"), "yyyyMMdd")).over(WindSpec))
-      .withColumn("new_item_id", concat(lit("buy_"), regexp_replace(lower(col("item_id")), "-", "_")))
-      .select("uid", "new_item_id", "max_date")
+      .withColumn("item_id", concat(lit("buy_"), regexp_replace(lower(col("item_id")), "-", "_")))
+      .select("uid", "item_id", "max_date")
 
-    // Сгруппируем и развернем информацию о покупках
-    val buyMatrix = buy.groupBy(col("uid"), col("max_date")).pivot("new_item_id")
-      .count().na.fill(0)
-
-    // объединенная просмотров и покупок матрица users * items
-    val unionMatrix = viewMatrix.join(buyMatrix, Seq("uid", "max_date"), "full").na.fill(0)
+    // объединение просмотров и покупок в один DF
+    val unionVisits: DataFrame = view.unionAll(buy)
 
     // определяем максимальную дату в объединенном df
-    val maxDate: String = unionMatrix
+    val maxDate: String = unionVisits
       .select(col("max_date"))
       .distinct
       .as[String]
@@ -61,18 +53,49 @@ object users_items {
       .replace("-","")
 
     // удаляем колонку с максимальной датой
-    val userItemMatrix = unionMatrix.drop(col("max_date"))
+    val dfVisits = unionVisits.drop(col("max_date"))
+
+    // Метод для чтения записанной матрицы и ее unpivot'а
+    def read_and_unpivot(): DataFrame = {
+      val oldUserItemMatrix = spark.read.parquet(outputDir + "/20200429")
+      val cols = oldUserItemMatrix.columns.filter(_.toLowerCase != "uid")
+      val alias_cols = "item_id,value"
+      val stack_exp = cols
+        .map(x => s"""'${x}',${x}""")
+        .mkString(s"stack(${cols.length},", ",", s""") as (${alias_cols})""")
+
+      val unpivotOldMatrix = oldUserItemMatrix
+        .select(col("uid"),expr(s"""${stack_exp}"""))
+        .filter(col("value")==="1")
+        .drop(col("value"))
+
+      unpivotOldMatrix
+    }
+
+    // Сгруппируем и развернем информацию в матрицу
+    def pivotnutyi_df(df: DataFrame): DataFrame = {
+      val unionMatrix = df
+        .groupBy(col("uid"))
+        .pivot("item_id")
+        .count().na.fill(0)
+      unionMatrix
+    }
+
 
     if (updateMode == "1") {
       // читаем старую таблицу и объединяем ее с новым df
-      val combineMatrix = spark.read.parquet(outputDir).union(userItemMatrix)
+      val oldUserItemMatrix = read_and_unpivot()
 
-      combineMatrix.write
+      val newMatrix: DataFrame = oldUserItemMatrix.unionAll(dfVisits)
+      val finalMatrix = pivotnutyi_df(newMatrix).coalesce(1)
+
+      finalMatrix.write
         .mode("overwrite")
         .parquet(outputDir + "/" + maxDate)
     }
     else {
-      userItemMatrix.write
+      val finalMatrix = pivotnutyi_df(dfVisits).coalesce(1)
+      finalMatrix.write
         .mode("append")
         .parquet(outputDir + "/" + maxDate)
     }
