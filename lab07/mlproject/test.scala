@@ -57,6 +57,7 @@ object test {
           .readStream
           .format("kafka")
           .options(kafkaParams)
+          .option("failOnDataLoss",value = false)
           .load()
 
         // Преобразуем входящие данные в Streaming DF
