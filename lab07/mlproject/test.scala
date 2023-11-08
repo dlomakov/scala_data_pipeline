@@ -57,7 +57,6 @@ object test {
           .readStream
           .format("kafka")
           .options(kafkaParams)
-          .option("failOnDataLoss",value = false)
           .load()
 
         // Преобразуем входящие данные в Streaming DF
@@ -82,7 +81,6 @@ object test {
             .option("checkpointLocation", checkpoint)
             .option("kafka.bootstrap.servers", s"$kafraHost:$kafkaPort")
             .option("topic", output_topic_name)
-            .option("failOnDataLoss",value = false)
             .trigger(Trigger.ProcessingTime("5 seconds"))
         }
 
