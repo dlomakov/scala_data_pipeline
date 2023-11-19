@@ -33,18 +33,18 @@ object train {
     .dropDuplicates(Seq("uid", "gender_age", "domain"))
     .groupBy(col("uid"),col("gender_age")).agg(collect_list(col("host")).alias("domains"))
     .select(col("uid"),col("domains"),col("gender_age"))
-
+     
   // Преобразуем список доменов (массив строк) в числовой вектор
   val cv = new CountVectorizer()
     .setInputCol("domains")
     .setOutputCol("features")
-
+     
   // Индексируем колонку "Пол-возраст" с помощью StringIndexer
   val indexer = new StringIndexer()
     .setInputCol("gender_age")
     .setOutputCol("label")
     .fit(training)
-     
+
   // Параметры логистической регрессии:
   val lr = new LogisticRegression()
     .setMaxIter(10)
@@ -55,7 +55,7 @@ object train {
     .setInputCol("prediction")
     .setOutputCol("category")
     .setLabels(indexer.labels)
-
+    
   // Пайплайн модели
   val pipeline = new Pipeline()
     .setStages(Array(cv, indexer, lr, indexToStringEstimator))
